@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0B1020" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="On-device drowsiness watcher. Runs entirely in your browser, sends nothing anywhere. Assistive only."
+    />
+    <title>Vigil — drowsiness watcher</title>
+    <link rel="icon" href="./icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+  </head>
+  <body>
+    <div class="app" id="app" data-screen="standby">
+      <header class="masthead">
+        <div class="wordmark">VIGIL</div>
+        <p class="advisory">Assistive only — not a safety system. Do not rely on it while driving.</p>
+      </header>
+
+      <section class="status" id="status" data-level="ok">
+        <span class="lamp" aria-hidden="true"></span>
+        <div class="status-text">
+          <p class="status-level" id="statusLevel">STANDBY</p>
+          <p class="status-reason" id="statusReason" role="status" aria-live="polite">
+            Calibrate first, then start a session.
+          </p>
+        </div>
+        <button class="dismiss" id="dismissButton" type="button" hidden>I'm awake</button>
+      </section>
+
+      <section class="trace-panel">
+        <canvas id="trace" class="trace" aria-label="Eye opening over the last 60 seconds"></canvas>
+        <div class="trace-legend">
+          <span>EYE OPENING · LAST 60 S</span>
+          <span class="legend-threshold">CLOSURE POINT</span>
+        </div>
+      </section>
+
+      <section class="metrics">
+        <div class="cell">
+          <p class="cell-label">PERCLOS</p>
+          <p class="cell-value" id="metricPerclos">—</p>
+          <p class="cell-unit">SHUT / OBSERVED</p>
+        </div>
+        <div class="cell">
+          <p class="cell-label">LONG BLINKS</p>
+          <p class="cell-value" id="metricBlinks">—</p>
+          <p class="cell-unit">PER MINUTE</p>
+        </div>
+        <div class="cell">
+          <p class="cell-label">HEAD DROP</p>
+          <p class="cell-value" id="metricNod">—</p>
+          <p class="cell-unit">NOD PROXY, NOT POSE</p>
+        </div>
+      </section>
+
+      <section class="deck">
+        <div class="preview-wrap">
+          <video id="preview" class="preview" playsinline muted></video>
+          <p class="preview-label" id="previewLabel">CAMERA OFF</p>
+        </div>
+        <div class="slider">
+          <label class="slider-label" for="closureSlider">
+            CLOSURE POINT <b id="closureValue">0.70</b>
+          </label>
+          <input type="range" id="closureSlider" min="0.5" max="0.88" step="0.01" value="0.7" />
+          <p class="slider-hint">Higher means the eye must be more shut before it counts as closed.</p>
+        </div>
+      </section>
+
+      <section class="actions">
+        <button id="startButton" class="primary" type="button">Start session</button>
+        <button id="stopButton" class="ghost" type="button" hidden>Stop</button>
+        <button id="calibrateButton" class="ghost" type="button">Calibrate</button>
+        <button id="testAlarmButton" class="ghost" type="button">Test alarm</button>
+      </section>
+
+      <div class="banner" id="banner" hidden>
+        <p class="banner-message" id="bannerMessage"></p>
+        <p class="banner-hint" id="bannerHint"></p>
+        <button class="banner-close" id="bannerClose" type="button">Dismiss</button>
+      </div>
+
+      <footer class="footer">
+        <span id="engineLabel">ENGINE IDLE</span>
+        <a href="https://github.com/rooterkyberian/vigil-watcher">SOURCE</a>
+      </footer>
+    </div>
+
+    <div class="overlay" id="calibrationOverlay" hidden>
+      <div class="overlay-card">
+        <p class="overlay-eyebrow">CALIBRATION</p>
+        <h2 class="overlay-title" id="calibrationTitle">Eyes open, look at the screen</h2>
+        <p class="overlay-body" id="calibrationBody">
+          Sit the way you will during the session and keep your eyes comfortably open.
+        </p>
+        <div class="progress"><div class="progress-fill" id="calibrationProgress"></div></div>
+        <p class="overlay-count" id="calibrationCount">8</p>
+        <button class="ghost" id="calibrationCancel" type="button">Cancel</button>
+      </div>
+    </div>
+
+    <div class="overlay" id="confirmOverlay" hidden>
+      <div class="overlay-card">
+        <p class="overlay-eyebrow">NETWORK REQUEST</p>
+        <h2 class="overlay-title">Fetch the face model?</h2>
+        <p class="overlay-body">
+          The bundled model is missing from this install, so Vigil cannot start offline. Downloading it
+          from Google is the only network request this app is able to make. No image, landmark or metric
+          is ever transmitted.
+        </p>
+        <div class="overlay-actions">
+          <button class="primary" id="confirmAllow" type="button">Download once</button>
+          <button class="ghost" id="confirmDeny" type="button">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
