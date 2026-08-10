@@ -1,4 +1,4 @@
-import { INFERENCE_FPS } from '../../src/config'
+import { INFERENCE_FPS, PROFILES, type Tuning } from '../../src/config'
 import { Arbiter, type Verdict } from '../../src/core/arbiter'
 import { closureThreshold } from '../../src/core/ear'
 import type { AlertLevel, Calibration, PitchProxy, Sample } from '../../src/core/types'
@@ -21,6 +21,9 @@ export const CALIBRATION: Calibration = {
 }
 
 export const THRESHOLD = closureThreshold(CALIBRATION)
+
+export const VIGILANT: Tuning = PROFILES.vigilant
+export const COUCH: Tuning = PROFILES.couch
 
 export class TraceBuilder {
   private readonly samples: Sample[] = []
@@ -101,24 +104,32 @@ export interface ReplayFrame {
   verdict: Verdict
 }
 
-export function replay(samples: readonly Sample[], calibration: Calibration = CALIBRATION): ReplayFrame[] {
+export function replay(
+  samples: readonly Sample[],
+  calibration: Calibration = CALIBRATION,
+  tuning: Tuning = VIGILANT,
+): ReplayFrame[] {
   const window = new SampleWindow()
-  const arbiter = new Arbiter()
+  const arbiter = new Arbiter(tuning)
   const threshold = closureThreshold(calibration)
   const frames: ReplayFrame[] = []
 
   for (const sample of samples) {
     window.push(sample)
-    const stats = window.compute(threshold, calibration.pitchBase)
+    const stats = window.compute(threshold, calibration.pitchBase, tuning)
     frames.push({ tMs: sample.tMs, stats, verdict: arbiter.update(stats, sample.tMs) })
   }
   return frames
 }
 
-export function finalStats(samples: readonly Sample[], calibration: Calibration = CALIBRATION): WindowStats {
+export function finalStats(
+  samples: readonly Sample[],
+  calibration: Calibration = CALIBRATION,
+  tuning: Tuning = VIGILANT,
+): WindowStats {
   const window = new SampleWindow()
   for (const sample of samples) window.push(sample)
-  return window.compute(closureThreshold(calibration), calibration.pitchBase)
+  return window.compute(closureThreshold(calibration), calibration.pitchBase, tuning)
 }
 
 export function levelsSeen(frames: readonly ReplayFrame[]): AlertLevel[] {

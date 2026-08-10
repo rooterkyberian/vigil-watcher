@@ -30,23 +30,9 @@ export const MIN_COVERAGE = 0.5
 export const MAX_SAMPLE_GAP_MS = 500
 export const MAX_SAMPLE_RATE_HZ = 30
 
-export const PERCLOS_CAUTION = 0.08
-export const PERCLOS_ALARM = 0.15
-
 export const BLINK_FLOOR_MS = 60
-export const LONG_BLINK_MS = 300
-export const LONG_BLINK_RATE_CAUTION = 2
-export const LONG_BLINK_RATE_ALARM = 4
-export const MICROSLEEP_MS = 800
-
-export const NOD_DRIFT_DEG = 16
 export const NOD_DEADBAND_DEG = 4
-
 export const FACE_LOST_MS = 1200
-
-export const DISMISS_MUTE_MS = 20_000
-export const MICROSLEEP_MUTE_MS = 5_000
-export const LEVEL_DWELL_MS = 3_000
 
 export const CLOSURE_POINT_MIN = 0.5
 export const CLOSURE_POINT_MAX = 0.88
@@ -65,30 +51,125 @@ export const RECALIBRATE_DRIFT_EAR = 0.05
 export const RECALIBRATE_CHECK_AFTER_MS = 20_000
 
 export const TRACE_WINDOW_MS = WINDOW_MS
-export const ALARM_TONE_A_HZ = 880
-export const ALARM_TONE_B_HZ = 1180
-export const ALARM_TONE_SWAP_MS = 210
 export const ALARM_TEST_MS = 1400
-export const VIBRATION_PATTERN = [220, 120, 220]
 
 export const STORAGE_KEY_CALIBRATION = 'vigil.calibration.v1'
+export const STORAGE_KEY_PROFILE = 'vigil.profile.v1'
+
+export type ProfileId = 'vigilant' | 'couch'
+
+export interface AlarmStyle {
+  waveform: OscillatorType
+  toneAHz: number
+  toneBHz: number
+  swapMs: number
+  gain: number
+  vibrate: readonly number[] | null
+}
+
+export interface Tuning {
+  id: ProfileId
+  label: string
+  blurb: string
+  perclosCaution: number
+  perclosAlarm: number
+  longBlinkMs: number
+  longBlinkRateCaution: number
+  longBlinkRateAlarm: number
+  microsleepMs: number
+  nodDriftDeg: number | null
+  levelDwellMs: number
+  dismissMuteMs: number
+  microsleepMuteMs: number
+  alarm: AlarmStyle
+}
+
+export const PROFILES: Record<ProfileId, Tuning> = {
+  vigilant: {
+    id: 'vigilant',
+    label: 'Vigilant',
+    blurb: 'Driver-monitoring thresholds. Fires early, on the first hint of drowsiness.',
+    perclosCaution: 0.08,
+    perclosAlarm: 0.15,
+    longBlinkMs: 300,
+    longBlinkRateCaution: 2,
+    longBlinkRateAlarm: 4,
+    microsleepMs: 800,
+    nodDriftDeg: 16,
+    levelDwellMs: 3_000,
+    dismissMuteMs: 20_000,
+    microsleepMuteMs: 5_000,
+    alarm: {
+      waveform: 'square',
+      toneAHz: 880,
+      toneBHz: 1180,
+      swapMs: 210,
+      gain: 0.28,
+      vibrate: [220, 120, 220],
+    },
+  },
+  couch: {
+    id: 'couch',
+    label: 'Couch',
+    blurb: 'Only once you are properly gone. Slow, quiet, and ignores a head resting back.',
+    perclosCaution: 0.25,
+    perclosAlarm: 0.45,
+    longBlinkMs: 600,
+    longBlinkRateCaution: 8,
+    longBlinkRateAlarm: 14,
+    microsleepMs: 4_000,
+    nodDriftDeg: null,
+    levelDwellMs: 6_000,
+    dismissMuteMs: 120_000,
+    microsleepMuteMs: 45_000,
+    alarm: {
+      waveform: 'sine',
+      toneAHz: 523,
+      toneBHz: 659,
+      swapMs: 600,
+      gain: 0.09,
+      vibrate: [400],
+    },
+  },
+}
+
+export const DEFAULT_PROFILE: ProfileId = 'vigilant'
+
+export function isProfileId(value: unknown): value is ProfileId {
+  return value === 'vigilant' || value === 'couch'
+}
 
 export function configProblems(): string[] {
   const problems: string[] = []
-  if (DISMISS_MUTE_MS <= WARMUP_MS) {
-    problems.push(
-      `DISMISS_MUTE_MS (${DISMISS_MUTE_MS}) must exceed WARMUP_MS (${WARMUP_MS}), otherwise the ` +
-        'window cleared on dismissal has not re-warmed by the time the mute lifts and the app is blind.',
-    )
+
+  for (const tuning of Object.values(PROFILES)) {
+    const where = `profile "${tuning.id}"`
+    if (tuning.dismissMuteMs <= WARMUP_MS) {
+      problems.push(
+        `${where}: dismissMuteMs (${tuning.dismissMuteMs}) must exceed WARMUP_MS (${WARMUP_MS}), otherwise ` +
+          'the window cleared on dismissal has not re-warmed when the mute lifts and the app is blind.',
+      )
+    }
+    if (tuning.microsleepMuteMs >= tuning.dismissMuteMs) {
+      problems.push(`${where}: microsleepMuteMs must be shorter than dismissMuteMs — microsleep stays live.`)
+    }
+    if (BLINK_FLOOR_MS >= tuning.longBlinkMs) problems.push(`${where}: BLINK_FLOOR_MS must be below longBlinkMs.`)
+    if (tuning.longBlinkMs >= tuning.microsleepMs) {
+      problems.push(`${where}: longBlinkMs must be below microsleepMs.`)
+    }
+    if (tuning.perclosCaution >= tuning.perclosAlarm) {
+      problems.push(`${where}: perclosCaution must be below perclosAlarm.`)
+    }
+    if (tuning.perclosAlarm > 1) problems.push(`${where}: perclosAlarm is a fraction and cannot exceed 1.`)
+    if (tuning.longBlinkRateCaution >= tuning.longBlinkRateAlarm) {
+      problems.push(`${where}: longBlinkRateCaution must be below longBlinkRateAlarm.`)
+    }
+    if (tuning.nodDriftDeg !== null && tuning.nodDriftDeg <= NOD_DEADBAND_DEG) {
+      problems.push(`${where}: nodDriftDeg must exceed NOD_DEADBAND_DEG or the deadband swallows it.`)
+    }
+    if (tuning.alarm.gain <= 0 || tuning.alarm.gain > 1) problems.push(`${where}: alarm gain must be in (0, 1].`)
   }
-  if (MICROSLEEP_MUTE_MS >= DISMISS_MUTE_MS) {
-    problems.push('MICROSLEEP_MUTE_MS must be shorter than DISMISS_MUTE_MS — microsleep stays live after a dismissal.')
-  }
-  if (BLINK_FLOOR_MS >= LONG_BLINK_MS) problems.push('BLINK_FLOOR_MS must be below LONG_BLINK_MS.')
-  if (PERCLOS_CAUTION >= PERCLOS_ALARM) problems.push('PERCLOS_CAUTION must be below PERCLOS_ALARM.')
-  if (LONG_BLINK_RATE_CAUTION >= LONG_BLINK_RATE_ALARM) {
-    problems.push('LONG_BLINK_RATE_CAUTION must be below LONG_BLINK_RATE_ALARM.')
-  }
+
   if (WARMUP_MS >= WINDOW_MS) problems.push('WARMUP_MS must be below WINDOW_MS.')
   if (CLOSURE_POINT_DEFAULT < CLOSURE_POINT_MIN || CLOSURE_POINT_DEFAULT > CLOSURE_POINT_MAX) {
     problems.push('CLOSURE_POINT_DEFAULT must sit inside the slider range.')

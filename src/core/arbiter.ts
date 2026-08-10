@@ -1,16 +1,4 @@
-import {
-  DISMISS_MUTE_MS,
-  FACE_LOST_MS,
-  LEVEL_DWELL_MS,
-  LONG_BLINK_RATE_ALARM,
-  LONG_BLINK_RATE_CAUTION,
-  MICROSLEEP_MS,
-  MICROSLEEP_MUTE_MS,
-  NOD_DRIFT_DEG,
-  PERCLOS_ALARM,
-  PERCLOS_CAUTION,
-  WARMUP_MS,
-} from '../config'
+import { FACE_LOST_MS, WARMUP_MS, type Tuning } from '../config'
 import type { AlertLevel, DataState, Millis, ReasonCode } from './types'
 import type { WindowStats } from './window'
 
@@ -26,10 +14,19 @@ const RANK: Record<AlertLevel, number> = { ok: 0, caution: 1, alarm: 2 }
 const IDLE: Verdict = { level: 'ok', reasonCode: 'ok', reason: 'Standing by', dataState: 'idle' }
 
 export class Arbiter {
+  private tuning: Tuning
   private verdict: Verdict = IDLE
   private levelSinceMs: Millis | null = null
   private windowMutedUntilMs: Millis | null = null
   private microsleepMutedUntilMs: Millis | null = null
+
+  constructor(tuning: Tuning) {
+    this.tuning = tuning
+  }
+
+  setTuning(tuning: Tuning): void {
+    this.tuning = tuning
+  }
 
   update(stats: WindowStats, tMs: Millis): Verdict {
     const dataState = resolveDataState(stats)
@@ -38,7 +35,7 @@ export class Arbiter {
     const windowMutedUntil = this.windowMutedUntilMs
     const microsleepMuted = microsleepMutedUntil !== null && tMs < microsleepMutedUntil
 
-    if (!microsleepMuted && stats.openClosureMs > MICROSLEEP_MS) {
+    if (!microsleepMuted && stats.openClosureMs > this.tuning.microsleepMs) {
       return this.settle(
         {
           level: 'alarm',
@@ -101,11 +98,11 @@ export class Arbiter {
     }
 
     const nod = stats.pitchDriftDeg ?? 0
-    const nodding = nod > NOD_DRIFT_DEG
+    const nodding = this.tuning.nodDriftDeg !== null && nod > this.tuning.nodDriftDeg
     const shutPercent = Math.round(perclos * 100)
     const blinkRate = Math.round(longBlinksPerMin)
 
-    if (perclos > PERCLOS_ALARM) {
+    if (perclos > this.tuning.perclosAlarm) {
       return this.settle(
         {
           level: 'alarm',
@@ -116,7 +113,7 @@ export class Arbiter {
         tMs,
       )
     }
-    if (longBlinksPerMin >= LONG_BLINK_RATE_ALARM) {
+    if (longBlinksPerMin >= this.tuning.longBlinkRateAlarm) {
       return this.settle(
         {
           level: 'alarm',
@@ -127,7 +124,7 @@ export class Arbiter {
         tMs,
       )
     }
-    if (nodding && perclos > PERCLOS_CAUTION) {
+    if (nodding && perclos > this.tuning.perclosCaution) {
       return this.settle(
         {
           level: 'alarm',
@@ -138,7 +135,7 @@ export class Arbiter {
         tMs,
       )
     }
-    if (perclos > PERCLOS_CAUTION) {
+    if (perclos > this.tuning.perclosCaution) {
       return this.settle(
         {
           level: 'caution',
@@ -149,7 +146,7 @@ export class Arbiter {
         tMs,
       )
     }
-    if (longBlinksPerMin >= LONG_BLINK_RATE_CAUTION) {
+    if (longBlinksPerMin >= this.tuning.longBlinkRateCaution) {
       return this.settle(
         {
           level: 'caution',
@@ -176,8 +173,8 @@ export class Arbiter {
   }
 
   dismiss(tMs: Millis): void {
-    this.windowMutedUntilMs = tMs + DISMISS_MUTE_MS
-    this.microsleepMutedUntilMs = tMs + MICROSLEEP_MUTE_MS
+    this.windowMutedUntilMs = tMs + this.tuning.dismissMuteMs
+    this.microsleepMutedUntilMs = tMs + this.tuning.microsleepMuteMs
     this.verdict = { level: 'ok', reasonCode: 'muted', reason: 'Dismissed', dataState: 'warming' }
     this.levelSinceMs = tMs
   }
@@ -194,7 +191,7 @@ export class Arbiter {
   }
 
   private settle(target: Verdict, tMs: Millis): Verdict {
-    const held = this.levelSinceMs !== null && tMs - this.levelSinceMs < LEVEL_DWELL_MS
+    const held = this.levelSinceMs !== null && tMs - this.levelSinceMs < this.tuning.levelDwellMs
     if (RANK[target.level] < RANK[this.verdict.level] && held) {
       this.verdict = { ...this.verdict, dataState: target.dataState }
       return this.verdict

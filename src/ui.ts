@@ -1,3 +1,4 @@
+import type { ProfileId } from './config'
 import type { AlertLevel, DataState } from './core/types'
 
 export type Screen = 'standby' | 'calibrating' | 'running'
@@ -42,6 +43,10 @@ export class Ui {
   private readonly calibrateButton = required<HTMLButtonElement>('calibrateButton')
   private readonly testAlarmButton = required<HTMLButtonElement>('testAlarmButton')
   private readonly dismissButton = required<HTMLButtonElement>('dismissButton')
+
+  private readonly modeVigilant = required<HTMLButtonElement>('modeVigilant')
+  private readonly modeCouch = required<HTMLButtonElement>('modeCouch')
+  private readonly modeBlurb = required<HTMLParagraphElement>('modeBlurb')
 
   private readonly banner = required<HTMLDivElement>('banner')
   private readonly bannerMessage = required<HTMLParagraphElement>('bannerMessage')
@@ -94,6 +99,12 @@ export class Ui {
   setClosurePoint(value: number): void {
     this.closureSlider.value = value.toFixed(2)
     this.closureValue.textContent = value.toFixed(2)
+  }
+
+  setProfile(profile: ProfileId, label: string, blurb: string): void {
+    this.modeVigilant.setAttribute('aria-checked', String(profile === 'vigilant'))
+    this.modeCouch.setAttribute('aria-checked', String(profile === 'couch'))
+    this.modeBlurb.textContent = `${label} — ${blurb}`
   }
 
   setCalibrationView(view: CalibrationView): void {
@@ -156,6 +167,10 @@ export class Ui {
   }
   onCancelCalibration(handler: () => void): void {
     this.calibrationCancel.addEventListener('click', handler)
+  }
+  onProfile(handler: (profile: ProfileId) => void): void {
+    this.modeVigilant.addEventListener('click', () => handler('vigilant'))
+    this.modeCouch.addEventListener('click', () => handler('couch'))
   }
   onClosurePoint(handler: (value: number) => void): void {
     this.closureSlider.addEventListener('input', () => {

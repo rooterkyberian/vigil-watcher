@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { BLINK_FLOOR_MS, LONG_BLINK_MS, MICROSLEEP_MS } from '../../src/config'
 import { SampleWindow } from '../../src/core/window'
-import { CALIBRATION, PERIOD_MS, THRESHOLD, TraceBuilder, finalStats, replay } from '../fixtures/synth'
+import { CALIBRATION, PERIOD_MS, THRESHOLD, TraceBuilder, VIGILANT, finalStats, replay } from '../fixtures/synth'
+
+const { longBlinkMs: LONG_BLINK_MS, microsleepMs: MICROSLEEP_MS } = VIGILANT
+const BLINK_FLOOR_MS = 60
 
 describe('steady state', () => {
   it('reports no closure at all while the eyes stay open', () => {
@@ -117,7 +119,7 @@ describe('window boundaries', () => {
     expect(window.push({ tMs: 999, earRaw: 0.3, pitch: null })).toBe(false)
     expect(window.push({ tMs: 1_067, earRaw: 0.3, pitch: null })).toBe(true)
     expect(window.drops).toBe(2)
-    expect(window.compute(THRESHOLD, null).sampleCount).toBe(2)
+    expect(window.compute(THRESHOLD, null, VIGILANT).sampleCount).toBe(2)
   })
 })
 
@@ -134,8 +136,8 @@ describe('determinism', () => {
     const window = new SampleWindow()
     for (const sample of samples) window.push(sample)
 
-    const strict = window.compute(0.2, CALIBRATION.pitchBase)
-    const loose = window.compute(0.16, CALIBRATION.pitchBase)
+    const strict = window.compute(0.2, CALIBRATION.pitchBase, VIGILANT)
+    const loose = window.compute(0.16, CALIBRATION.pitchBase, VIGILANT)
     expect(strict.perclos ?? 0).toBeGreaterThan(0)
     expect(loose.perclos).toBe(0)
   })

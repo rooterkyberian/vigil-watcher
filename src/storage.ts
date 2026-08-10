@@ -1,4 +1,4 @@
-import { STORAGE_KEY_CALIBRATION } from './config'
+import { DEFAULT_PROFILE, STORAGE_KEY_CALIBRATION, STORAGE_KEY_PROFILE, isProfileId, type ProfileId } from './config'
 import type { Calibration } from './core/types'
 
 export function loadCalibration(): Calibration | null {
@@ -13,6 +13,15 @@ export function loadCalibration(): Calibration | null {
 
 export function saveCalibration(calibration: Calibration): boolean {
   return write(STORAGE_KEY_CALIBRATION, JSON.stringify(calibration))
+}
+
+export function loadProfile(): ProfileId {
+  const raw = read(STORAGE_KEY_PROFILE)
+  return isProfileId(raw) ? raw : DEFAULT_PROFILE
+}
+
+export function saveProfile(profile: ProfileId): boolean {
+  return write(STORAGE_KEY_PROFILE, profile)
 }
 
 export function clearCalibration(): void {

@@ -1,10 +1,4 @@
-import {
-  ALARM_TEST_MS,
-  ALARM_TONE_A_HZ,
-  ALARM_TONE_B_HZ,
-  ALARM_TONE_SWAP_MS,
-  VIBRATION_PATTERN,
-} from './config'
+import { ALARM_TEST_MS, type AlarmStyle } from './config'
 
 export class Alarm {
   private context: AudioContext | null = null
@@ -15,7 +9,18 @@ export class Alarm {
   private high = false
   private running = false
 
-  constructor(private readonly flashTarget: HTMLElement) {}
+  constructor(
+    private readonly flashTarget: HTMLElement,
+    private style: AlarmStyle,
+  ) {}
+
+  setStyle(style: AlarmStyle): void {
+    this.style = style
+    if (this.running) {
+      this.stopTone()
+      this.startTone()
+    }
+  }
 
   get ready(): boolean {
     return this.context !== null && this.context.state === 'running'
@@ -62,8 +67,8 @@ export class Alarm {
 
     const oscillator = context.createOscillator()
     const gain = context.createGain()
-    oscillator.type = 'square'
-    oscillator.frequency.setValueAtTime(ALARM_TONE_A_HZ, context.currentTime)
+    oscillator.type = this.style.waveform
+    oscillator.frequency.setValueAtTime(this.style.toneAHz, context.currentTime)
     gain.gain.setValueAtTime(0.0001, context.currentTime)
     oscillator.connect(gain)
     gain.connect(context.destination)
@@ -73,7 +78,7 @@ export class Alarm {
     this.gain = gain
     this.high = false
     this.pulse()
-    this.swapTimer = window.setInterval(() => this.pulse(), ALARM_TONE_SWAP_MS)
+    this.swapTimer = window.setInterval(() => this.pulse(), this.style.swapMs)
   }
 
   private pulse(): void {
@@ -81,12 +86,13 @@ export class Alarm {
     if (context === null || this.oscillator === null || this.gain === null) return
     const now = context.currentTime
     this.high = !this.high
-    this.oscillator.frequency.setValueAtTime(this.high ? ALARM_TONE_B_HZ : ALARM_TONE_A_HZ, now)
-    const seconds = ALARM_TONE_SWAP_MS / 1000
+    this.oscillator.frequency.setValueAtTime(this.high ? this.style.toneBHz : this.style.toneAHz, now)
+    const seconds = this.style.swapMs / 1000
+    const peak = this.style.gain
     this.gain.gain.cancelScheduledValues(now)
     this.gain.gain.setValueAtTime(0.0001, now)
-    this.gain.gain.exponentialRampToValueAtTime(0.28, now + seconds * 0.12)
-    this.gain.gain.setValueAtTime(0.28, now + seconds * 0.7)
+    this.gain.gain.exponentialRampToValueAtTime(peak, now + seconds * 0.12)
+    this.gain.gain.setValueAtTime(peak, now + seconds * 0.7)
     this.gain.gain.exponentialRampToValueAtTime(0.0001, now + seconds * 0.95)
   }
 
@@ -107,10 +113,11 @@ export class Alarm {
   }
 
   private startVibration(): void {
-    if (typeof navigator.vibrate !== 'function') return
-    const period = VIBRATION_PATTERN.reduce((total, part) => total + part, 0) + 160
+    const pattern = this.style.vibrate
+    if (pattern === null || typeof navigator.vibrate !== 'function') return
+    const period = pattern.reduce((total, part) => total + part, 0) + 160
     const fire = (): void => {
-      navigator.vibrate(VIBRATION_PATTERN)
+      navigator.vibrate([...pattern])
     }
     fire()
     this.vibrateTimer = window.setInterval(fire, period)

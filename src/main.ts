@@ -5,11 +5,16 @@ import {
   CLOSURE_POINT_DEFAULT,
   CLOSURE_POINT_MAX,
   CLOSURE_POINT_MIN,
+  DEFAULT_PROFILE,
   FACE_LOST_MS,
   INFERENCE_INTERVAL_MS,
+  PROFILES,
   RECALIBRATE_CHECK_AFTER_MS,
   RECALIBRATE_DRIFT_EAR,
   configProblems,
+  isProfileId,
+  type ProfileId,
+  type Tuning,
 } from './config'
 import { Arbiter, type Verdict } from './core/arbiter'
 import { CalibrationRun } from './core/calibration'
@@ -27,7 +32,7 @@ import type {
 import { SampleWindow, type WindowStats } from './core/window'
 import { createDetector, type Detector } from './detector'
 import { drawTrace } from './render'
-import { clearCalibration, loadCalibration, saveCalibration } from './storage'
+import { clearCalibration, loadCalibration, loadProfile, saveCalibration, saveProfile } from './storage'
 import { Ui, type CalibrationView } from './ui'
 import { WakeLockKeeper } from './wakelock'
 
@@ -55,11 +60,13 @@ export interface CalibrationPatch {
 }
 
 export interface VigilDebug {
-  feed(trace: readonly DebugSample[], calibration?: Calibration): DebugFrame[]
+  feed(trace: readonly DebugSample[], calibration?: Calibration, profile?: ProfileId): DebugFrame[]
   signals(): Signals | null
   setCalibration(patch: CalibrationPatch): Calibration | null
   simulateClosure(durationMs: number): void
   calibration(): Calibration | null
+  profile(): ProfileId
+  setProfile(profile: ProfileId): ProfileId
   forget(): void
 }
 
@@ -71,7 +78,7 @@ declare global {
 
 class Controller {
   private readonly window = new SampleWindow()
-  private readonly arbiter = new Arbiter()
+  private readonly arbiter = new Arbiter(PROFILES[DEFAULT_PROFILE])
   private readonly wakeLock = new WakeLockKeeper()
   private readonly alarm: Alarm
 
@@ -87,6 +94,7 @@ class Controller {
   private simulateUntilMs: number | null = null
   private alarming = false
   private closurePoint = CLOSURE_POINT_DEFAULT
+  private tuning: Tuning = PROFILES[DEFAULT_PROFILE]
 
   private stats: WindowStats | null = null
   private verdict: Verdict | null = null
@@ -94,7 +102,7 @@ class Controller {
   private driftChecked = false
 
   constructor(private readonly ui: Ui) {
-    this.alarm = new Alarm(document.body)
+    this.alarm = new Alarm(document.body, this.tuning.alarm)
   }
 
   init(): void {
@@ -107,6 +115,7 @@ class Controller {
     this.calibration = loadCalibration()
     if (this.calibration !== null) this.closurePoint = this.calibration.closurePoint
     this.ui.setClosurePoint(this.closurePoint)
+    this.applyProfile(loadProfile(), false)
 
     this.ui.onStart(() => void this.start())
     this.ui.onStop(() => void this.stop())
@@ -115,6 +124,7 @@ class Controller {
     this.ui.onDismiss(() => this.dismiss())
     this.ui.onCancelCalibration(() => this.cancelCalibration())
     this.ui.onClosurePoint((value) => this.setClosurePoint(value))
+    this.ui.onProfile((profile) => this.applyProfile(profile, true))
 
     this.ui.setScreen('standby')
     this.ui.setStatus('ok', 'idle', 'STANDBY', this.standbyMessage())
@@ -320,7 +330,7 @@ class Controller {
 
     this.window.push({ tMs: sample.tMs, earRaw, pitch: sample.pitch })
 
-    const stats = this.window.compute(closureThreshold(calibration), calibration.pitchBase)
+    const stats = this.window.compute(closureThreshold(calibration), calibration.pitchBase, this.tuning)
     const verdict = this.arbiter.update(stats, nowMs)
     this.stats = stats
     this.verdict = verdict
@@ -372,6 +382,14 @@ class Controller {
     this.ui.showDismiss(false)
   }
 
+  private applyProfile(profile: ProfileId, persist: boolean): void {
+    this.tuning = PROFILES[profile]
+    this.arbiter.setTuning(this.tuning)
+    this.alarm.setStyle(this.tuning.alarm)
+    this.ui.setProfile(profile, this.tuning.label, this.tuning.blurb)
+    if (persist) saveProfile(profile)
+  }
+
   private setClosurePoint(value: number): void {
     this.closurePoint = clamp(value, CLOSURE_POINT_MIN, CLOSURE_POINT_MAX)
     if (this.calibration === null) return
@@ -381,13 +399,19 @@ class Controller {
 
   private installDebugHandle(): void {
     window.vigil = {
-      feed: (trace, calibration) => this.replay(trace, calibration),
+      feed: (trace, calibration, profile) => this.replay(trace, calibration, profile),
       signals: () => (this.stats === null || this.verdict === null ? null : toSignals(this.stats, this.verdict)),
       setCalibration: (patch) => this.patchCalibration(patch),
       simulateClosure: (durationMs) => {
         this.simulateUntilMs = performance.now() + durationMs
       },
       calibration: () => this.calibration,
+      profile: () => this.tuning.id,
+      setProfile: (profile) => {
+        if (!isProfileId(profile)) throw new Error(`unknown profile "${String(profile)}"`)
+        this.applyProfile(profile, true)
+        return profile
+      },
       forget: () => {
         clearCalibration()
         this.calibration = null
@@ -396,18 +420,19 @@ class Controller {
     }
   }
 
-  private replay(trace: readonly DebugSample[], override?: Calibration): DebugFrame[] {
+  private replay(trace: readonly DebugSample[], override?: Calibration, profile?: ProfileId): DebugFrame[] {
     const calibration = override ?? this.calibration
     if (calibration === null) throw new Error('vigil.feed needs a calibration — pass one or calibrate first')
 
+    const tuning = profile === undefined ? this.tuning : PROFILES[profile]
     const window = new SampleWindow()
-    const arbiter = new Arbiter()
+    const arbiter = new Arbiter(tuning)
     const threshold = closureThreshold(calibration)
     const frames: DebugFrame[] = []
 
     for (const entry of trace) {
       window.push({ tMs: entry.tMs, earRaw: entry.earRaw, pitch: entry.pitch ?? null })
-      const stats = window.compute(threshold, calibration.pitchBase)
+      const stats = window.compute(threshold, calibration.pitchBase, tuning)
       const verdict = arbiter.update(stats, entry.tMs)
       frames.push({
         tMs: entry.tMs,

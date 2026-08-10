@@ -1,13 +1,13 @@
 import {
   BLINK_FLOOR_MS,
   EMA_ALPHA,
-  LONG_BLINK_MS,
   MAX_SAMPLE_GAP_MS,
   MAX_SAMPLE_RATE_HZ,
   MIN_COVERAGE,
   NOD_DEADBAND_DEG,
   WARMUP_MS,
   WINDOW_MS,
+  type Tuning,
 } from '../config'
 import { crossingFraction, ema, median3, pitchDriftDeg } from './ear'
 import type { Closure, Degrees, Ear, Millis, PitchProxy, Sample, TracePoint } from './types'
@@ -84,7 +84,7 @@ export class SampleWindow {
     return this.droppedTimestamps
   }
 
-  compute(threshold: Ear, pitchBase: PitchProxy | null): WindowStats {
+  compute(threshold: Ear, pitchBase: PitchProxy | null, tuning: Tuning): WindowStats {
     const empty = this.count === 0
     const newest = this.at(this.count - 1)
     const oldest = this.at(0)
@@ -170,7 +170,9 @@ export class SampleWindow {
     const coverage = spanMs > 0 ? observedMs / spanMs : 0
     const trustworthy = observedMs >= WARMUP_MS && coverage >= MIN_COVERAGE
 
-    const longBlinkCount = kept.filter((c) => !c.endedByFaceLoss && c.durationMs >= LONG_BLINK_MS).length
+    const longBlinkCount = kept.filter(
+      (c) => !c.endedByFaceLoss && c.durationMs >= tuning.longBlinkMs,
+    ).length
 
     const openClosureMs =
       closureStart !== null && newest !== null && newest.earFiltered !== null

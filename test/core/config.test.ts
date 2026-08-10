@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
-  DISMISS_MUTE_MS,
   EAR_LANDMARKS,
   INFERENCE_FPS,
   MAX_SAMPLE_RATE_HZ,
+  PROFILES,
   WARMUP_MS,
   configProblems,
 } from '../../src/config'
@@ -13,8 +13,10 @@ describe('config invariants', () => {
     expect(configProblems()).toEqual([])
   })
 
-  it('keeps the dismissal mute longer than the warm-up, or the app goes blind after a dismissal', () => {
-    expect(DISMISS_MUTE_MS).toBeGreaterThan(WARMUP_MS)
+  it('keeps every dismissal mute longer than the warm-up, or the app goes blind after a dismissal', () => {
+    for (const tuning of Object.values(PROFILES)) {
+      expect(tuning.dismissMuteMs).toBeGreaterThan(WARMUP_MS)
+    }
   })
 
   it('uses six distinct landmarks per eye', () => {

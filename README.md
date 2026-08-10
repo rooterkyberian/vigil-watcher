@@ -41,17 +41,33 @@ Both eyes are averaged. Landmark `x` is scaled by the video aspect ratio first, 
 
 ### Signals
 
-| Signal | Definition | Default trip point |
-|---|---|---|
-| PERCLOS | fraction of *observed* time with the eyes below the closure threshold, over a 60 s window | 0.08 caution, 0.15 alarm |
-| Long blinks | closures longer than 300 ms, per minute of observed time | 2/min caution, 4/min alarm |
-| Microsleep | one continuous closure | 800 ms, alarms immediately and bypasses the window |
-| Head drop | forehead→chin foreshortening against a calibrated baseline | 16° |
-| Blink floor | closures under 60 ms are discarded as landmark noise | — |
+Trip points depend on the selected watch mode (caution / alarm):
+
+| Signal | Definition | Vigilant | Couch |
+|---|---|---|---|
+| PERCLOS | fraction of *observed* time with the eyes below the closure threshold, over a 60 s window | 0.08 / 0.15 | 0.25 / 0.45 |
+| Long blinks | closures longer than the mode's long-blink length, per minute of observed time | >300 ms · 2 / 4 per min | >600 ms · 8 / 14 per min |
+| Microsleep | one continuous closure; alarms immediately and bypasses the window | 800 ms | 4 s |
+| Head drop | forehead→chin foreshortening against a calibrated baseline | 16° | off |
+| Confirmation dwell | how long a level is held before it may fall back | 3 s | 6 s |
+| Blink floor | closures under 60 ms are discarded as landmark noise | 60 ms | 60 ms |
 
 PERCLOS needs 15 s of observed data before it reports anything, and at least 50 % coverage of the window — a long stretch of missing face will not produce a confident number from a handful of frames.
 
 **These thresholds are literature-derived starting points, not tuned for any particular camera or person.** Published values range roughly 0.08–0.20 depending on window length, closure definition (80 % closed vs. fully closed) and study population. All of them live in `src/config.ts`.
+
+### Watch modes
+
+The literature thresholds are derived from driver monitoring, where a false alarm costs you a moment of irritation and a missed one costs a great deal more. On a sofa that trade runs the other way round, so the tuning is selectable.
+
+- **Vigilant** — the driver-monitoring numbers above. Fires early, on the first hint of drowsiness.
+- **Couch** — for watching something and wanting to know when you have actually gone under. A single 4 s closure is the primary trigger; PERCLOS and blink rate are backstops. The alarm is a soft sine pair at roughly a third of the volume, and dismissing it buys two minutes of quiet rather than twenty seconds.
+
+The one signal Couch switches off entirely is **head drop**. The nod proxy measures drift from the posture you calibrated in, so settling back into the cushions registers as a 20° drop within seconds of starting — the single worst false positive on a sofa, and it fires while you are wide awake. Detecting a genuine head-loll separately from a deliberate lean needs a baseline that tracks posture over minutes, which is M3's adaptive-baseline work.
+
+Modes only change thresholds. The same calibration, the same window and the same arbitration ladder run underneath, so switching mode re-evaluates the last 60 seconds immediately — no recalibration, no warm-up penalty.
+
+**Couch mode is not a relaxed safety setting.** It is deliberately slow and quiet, and it will happily let several seconds of closure pass without a sound. Neither mode belongs in a car.
 
 ### Alert arbitration
 
@@ -84,6 +100,7 @@ Each of these is a deliberate choice, not an oversight.
 - **PERCLOS is time-weighted, not sample-counted.** At 15 Hz a frame is 66.7 ms, so counting samples would quantise every blink to ±67 ms and make the 60 ms noise floor unenforceable. Threshold crossings are linearly interpolated between samples instead, which also keeps the metric correct when frames are dropped.
 - **Closure detection runs on a median-of-3 filter, not the EMA.** An EMA with α = 0.45 at 15 Hz has a ~150 ms effective window and attenuates a 120 ms blink below the threshold entirely. A median filter kills single-frame landmark dropouts while preserving edges. The trade-off is an effective floor of about two frames (~130 ms); a genuine single-frame dip is treated as noise. The EMA is kept for the on-screen readout.
 - **Head drop is measured in 2D.** MediaPipe's `z` is relative and noisy enough that an atan2 in the y–z plane would mostly track jitter. Vigil uses image-plane forehead→chin length over inter-ocular distance instead, which foreshortens as the head pitches; `acos` of the ratio against the calibrated baseline gives an honest weak-perspective angle with no `z` at all. Sign comes from how the face's vertical balance shifts. It is a **nod detector, not head-pose estimation**, and it is labelled that way in the UI.
+- **Thresholds are a swappable profile, not module constants.** The core takes a `Tuning` object, so a watch mode is a data change rather than a code path. `configProblems()` validates the invariants for every profile at startup, not just the default.
 - **Dismissing an alarm does not mute microsleep.** "I'm awake" clears the window and mutes the window-derived triggers for 20 s, but a fresh 800 ms closure still alarms after a 5 s guard. Someone who dismisses and immediately shuts their eyes is the case that matters most. (`DISMISS_MUTE_MS > WARMUP_MS` is asserted at startup — otherwise the cleared window has not re-warmed when the mute lifts and the app is blind.)
 - **Only the WebAssembly SIMD runtime is bundled.** MediaPipe ships three ~11 MB builds; the loader selects exactly one, and the ES-module variant is never chosen. Shipping all three meant a 38 MB precache. Vigil bundles the SIMD build (15.7 MB total precache) and probes for SIMD explicitly, so a browser without it gets a clear message rather than a 404.
 - **`display: standalone`, not `fullscreen`.** A monitoring session runs for an hour unattended; hiding the clock and battery for that long is a worse trade than the extra strip of chrome.
@@ -123,10 +140,12 @@ vigil.signals()                  // current PERCLOS / blink rate / head drop / l
 vigil.setCalibration({ open: 0.31, closed: 0.11 })
 vigil.simulateClosure(1200)      // force an alarm, to test the alert path
 vigil.calibration()              // what is stored
+vigil.profile()                  // 'vigilant' | 'couch'
+vigil.setProfile('couch')        // switch mode, persisted
 vigil.forget()                   // clear stored calibration
 ```
 
-`vigil.feed` takes `{ tMs, earRaw, pitch? }[]` and returns one frame per sample, so thresholds can be checked against a recorded trace instead of against vibes.
+`vigil.feed` takes `{ tMs, earRaw, pitch? }[]` and returns one frame per sample, so thresholds can be checked against a recorded trace instead of against vibes. It accepts an optional third argument naming a watch mode, which makes it easy to replay one trace through both tunings and compare.
 
 ### Offline is a hard requirement
 
@@ -144,7 +163,7 @@ Push to `main`. `.github/workflows/deploy.yml` builds and publishes to Pages; se
 
 | File | Owns |
 |---|---|
-| `src/config.ts` | Every tunable: thresholds, windows, FPS cap, landmark indices, calibration timings, plus the invariants between them |
+| `src/config.ts` | Every tunable: the `PROFILES` table of watch modes, windows, FPS cap, landmark indices, calibration timings, plus the invariants between them |
 | `src/core/types.ts` | `Sample`, `Signals`, `AlertLevel`, `Calibration`, `Closure`, `ReasonCode` |
 | `src/core/ear.ts` | Pure geometry and filters: `eyeAspect`, head-pitch proxy, median/EMA, percentiles, threshold crossing |
 | `src/core/window.ts` | Rolling raw-sample ring buffer; time-weighted PERCLOS, closure FSM, long-blink rate, trace view |
